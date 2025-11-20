@@ -286,7 +286,7 @@ def compute_per_order_and_agg(items_df: DataFrame, customers_df: DataFrame, refu
     # join customers and filter active
     if not customers_df.rdd.isEmpty():
         per_order = per_order.join(customers_df.select("customer_id", "city", "is_active"), "customer_id", "left")
-        per_order = per_order.filter(col("is_active") == True)
+        per_order = per_order.filter(col("is_active"))
     # parse order_date
     per_order = per_order.withColumn("order_date", to_date(col("created_at")))
     # refunds

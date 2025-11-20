@@ -4,7 +4,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, ArrayType
 from pyspark.sql.functions import col
 
-from pipeline_pyspark import explode_items, deduplicate_keep_first, compute_per_order_and_agg, read_customers
+from pipeline_pyspark import explode_items, deduplicate_keep_first
 
 @pytest.fixture(scope="module")
 def spark():

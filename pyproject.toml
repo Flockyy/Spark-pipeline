@@ -6,8 +6,10 @@ readme = "README.md"
 requires-python = ">=3.11.7"
 
 dependencies = [
+    "black>=25.11.0",
     "pandas>=2.3.3",
     "pyspark>=4.0.1",
     "pytest>=9.0.1",
     "pyyaml>=6.0.2",
+    "ruff>=0.14.5",
 ]

@@ -12,7 +12,6 @@ Notes:
 """
 
 import argparse
-import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -173,7 +172,7 @@ def aggregate_orders(per_item: pd.DataFrame, customers: pd.DataFrame, refunds: p
     # join customer info and keep active customers only
     cust_subset = customers[["customer_id", "city", "is_active"]].drop_duplicates(subset=["customer_id"])
     per_order = per_order.merge(cust_subset, on="customer_id", how="left")
-    per_order = per_order[per_order["is_active"].fillna(False) == True].copy()
+    per_order = per_order[per_order["is_active"].fillna(False)].copy()
     # parse created_at into a date string ISO
     def to_iso_date(s):
         if pd.isna(s):
