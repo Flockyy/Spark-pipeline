@@ -464,9 +464,7 @@ def run_pipeline(
 # ---------------------------
 # CLI
 # ---------------------------
-# ---------------------------
-# CLI
-# ---------------------------
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--settings", default="settings.yaml")

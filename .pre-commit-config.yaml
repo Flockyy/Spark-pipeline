@@ -18,6 +18,6 @@ repos:
     hooks:
       - id: run-tests
         name: Run pytest
-        entry: uv run pytest -q
+        entry: bash -c "PYTHONPATH=$PYTHONPATH:$(pwd) uv run pytest -q"
         language: system
         types: [python]
