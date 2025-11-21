@@ -1,10 +1,11 @@
 # File: tests/test_pipeline.py
 import pytest
-from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType, ArrayType
-from pyspark.sql.functions import col
+from pipeline_pyspark import deduplicate_keep_first, explode_items
 
-from pipeline_pyspark import explode_items, deduplicate_keep_first
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col
+from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType
+
 
 @pytest.fixture(scope="module")
 def spark():
@@ -16,23 +17,40 @@ def spark():
 def test_explode_items(spark):
     """Test that explode_items correctly explodes nested item arrays."""
     items_schema = ArrayType(
-        StructType([
-            StructField("qty", DoubleType(), True),
-            StructField("unit_price", DoubleType(), True)
-        ])
+        StructType(
+            [
+                StructField("qty", DoubleType(), True),
+                StructField("unit_price", DoubleType(), True),
+            ]
+        )
     )
-    schema = StructType([
-        StructField("order_id", StringType(), True),
-        StructField("customer_id", StringType(), True),
-        StructField("channel", StringType(), True),
-        StructField("created_at", StringType(), True),
-        StructField("items", items_schema, True)
-    ])
+    schema = StructType(
+        [
+            StructField("order_id", StringType(), True),
+            StructField("customer_id", StringType(), True),
+            StructField("channel", StringType(), True),
+            StructField("created_at", StringType(), True),
+            StructField("items", items_schema, True),
+        ]
+    )
     data = [
-        {"order_id": "o1", "customer_id": "c1", "channel": "web",
-         "created_at": "2025-03-01 10:00:00", "items": [{"qty": 2.0, "unit_price": 5.0}]},
-        {"order_id": "o2", "customer_id": "c2", "channel": "web",
-         "created_at": "2025-03-02 11:00:00", "items": [{"qty": 1.0, "unit_price": 10.0}, {"qty": 1.0, "unit_price": -1.0}]},
+        {
+            "order_id": "o1",
+            "customer_id": "c1",
+            "channel": "web",
+            "created_at": "2025-03-01 10:00:00",
+            "items": [{"qty": 2.0, "unit_price": 5.0}],
+        },
+        {
+            "order_id": "o2",
+            "customer_id": "c2",
+            "channel": "web",
+            "created_at": "2025-03-02 11:00:00",
+            "items": [
+                {"qty": 1.0, "unit_price": 10.0},
+                {"qty": 1.0, "unit_price": -1.0},
+            ],
+        },
     ]
     df = spark.createDataFrame(data, schema=schema)
 
@@ -53,18 +71,41 @@ def test_explode_items(spark):
 def test_deduplicate_keep_first(spark):
     """Test that deduplicate_keep_first keeps only the first record per order_id."""
     data = [
-        {"order_id": "o1", "customer_id": "c1", "channel": "web", "created_at": "2025-03-01 10:00:00", "item_qty": 2.0, "item_unit_price": 5.0},
-        {"order_id": "o1", "customer_id": "c1", "channel": "web", "created_at": "2025-03-01 12:00:00", "item_qty": 1.0, "item_unit_price": 3.0},
-        {"order_id": "o2", "customer_id": "c2", "channel": "web", "created_at": "2025-03-02 11:00:00", "item_qty": 1.0, "item_unit_price": 10.0},
+        {
+            "order_id": "o1",
+            "customer_id": "c1",
+            "channel": "web",
+            "created_at": "2025-03-01 10:00:00",
+            "item_qty": 2.0,
+            "item_unit_price": 5.0,
+        },
+        {
+            "order_id": "o1",
+            "customer_id": "c1",
+            "channel": "web",
+            "created_at": "2025-03-01 12:00:00",
+            "item_qty": 1.0,
+            "item_unit_price": 3.0,
+        },
+        {
+            "order_id": "o2",
+            "customer_id": "c2",
+            "channel": "web",
+            "created_at": "2025-03-02 11:00:00",
+            "item_qty": 1.0,
+            "item_unit_price": 10.0,
+        },
     ]
-    schema = StructType([
-        StructField("order_id", StringType(), True),
-        StructField("customer_id", StringType(), True),
-        StructField("channel", StringType(), True),
-        StructField("created_at", StringType(), True),
-        StructField("item_qty", DoubleType(), True),
-        StructField("item_unit_price", DoubleType(), True),
-    ])
+    schema = StructType(
+        [
+            StructField("order_id", StringType(), True),
+            StructField("customer_id", StringType(), True),
+            StructField("channel", StringType(), True),
+            StructField("created_at", StringType(), True),
+            StructField("item_qty", DoubleType(), True),
+            StructField("item_unit_price", DoubleType(), True),
+        ]
+    )
     df = spark.createDataFrame(data, schema=schema)
 
     deduped = deduplicate_keep_first(df)

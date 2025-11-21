@@ -27,21 +27,12 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import yaml
-from pyspark.sql import DataFrame
 
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql.functions import coalesce, col, countDistinct, explode, lit
+from pyspark.sql.functions import sum as _sum
+from pyspark.sql.functions import to_date, when
 from pyspark.sql.types import DoubleType, StringType
-from pyspark.sql import  SparkSession
-from pyspark.sql.functions import (
-    col, 
-    explode, 
-    coalesce,
-    sum as _sum,
-    countDistinct,
-    when,
-    to_date,
-    lit,
-)
-
 
 # ---------------------------
 # Logging
@@ -49,7 +40,9 @@ from pyspark.sql.functions import (
 logger = logging.getLogger("pyspark_pipeline")
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+handler.setFormatter(
+    logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+)
 logger.addHandler(handler)
 
 
@@ -71,7 +64,9 @@ class Metrics:
             self.Gauge = Gauge
             self._use_prom = True
             self._prom_registry = {}
-            logger.info("Prometheus client is available; metrics will be exported if configured.")
+            logger.info(
+                "Prometheus client is available; metrics will be exported if configured."
+            )
         except Exception:
             self._use_prom = False
             logger.info("Prometheus client not available; using in-memory metrics.")
@@ -84,12 +79,15 @@ class Metrics:
         else:
             # simple lambda simulating .inc()
             self._counters.setdefault(name, 0)
+
             class _Ctr:
                 def __init__(self, store, key):
                     self._store = store
                     self._key = key
+
                 def inc(self, v=1):
                     self._store[self._key] = self._store.get(self._key, 0) + v
+
             return _Ctr(self._counters, name)
 
     def gauge(self, name: str, description: str = ""):
@@ -99,12 +97,15 @@ class Metrics:
             return self._prom_registry[name]
         else:
             self._counters.setdefault(name, 0)
+
             class _Gauge:
                 def __init__(self, store, key):
                     self._store = store
                     self._key = key
+
                 def set(self, v):
                     self._store[self._key] = v
+
             return _Gauge(self._counters, name)
 
     def snapshot(self) -> Dict[str, int]:
@@ -113,8 +114,12 @@ class Metrics:
 
 metrics = Metrics()
 # common counters
-orders_processed_ctr = metrics.counter("orders_processed_total", "Number of orders processed")
-orders_rejected_ctr = metrics.counter("orders_rejected_total", "Number of rejected item lines (negative price)")
+orders_processed_ctr = metrics.counter(
+    "orders_processed_total", "Number of orders processed"
+)
+orders_rejected_ctr = metrics.counter(
+    "orders_rejected_total", "Number of rejected item lines (negative price)"
+)
 
 
 # ---------------------------
@@ -145,7 +150,10 @@ def load_settings(path: str = "settings.yaml") -> Dict:
 # Spark utilities
 # ---------------------------
 
-def create_spark(app_name: str = "OrdersPipeline", master: Optional[str] = None) -> SparkSession:
+
+def create_spark(
+    app_name: str = "OrdersPipeline", master: Optional[str] = None
+) -> SparkSession:
     builder = SparkSession.builder.appName(app_name)
     if master:
         builder = builder.master(master)
@@ -157,11 +165,14 @@ def create_spark(app_name: str = "OrdersPipeline", master: Optional[str] = None)
 # I/O readers
 # ---------------------------
 
+
 def read_customers(spark: SparkSession, path: Path) -> DataFrame:
     if not path.exists():
         logger.warning("customers.csv not found: %s", path)
         # return empty DataFrame with expected schema columns
-        return spark.createDataFrame([], schema="customer_id string, city string, is_active boolean")
+        return spark.createDataFrame(
+            [], schema="customer_id string, city string, is_active boolean"
+        )
     df = spark.read.option("header", True).csv(str(path))
     # normalize is_active
     df = df.withColumn(
@@ -177,14 +188,18 @@ def read_customers(spark: SparkSession, path: Path) -> DataFrame:
 def read_refunds(spark: SparkSession, path: Path) -> DataFrame:
     if not path.exists():
         logger.warning("refunds.csv not found: %s", path)
-        return spark.createDataFrame([], schema="order_id string, amount double, created_at string")
+        return spark.createDataFrame(
+            [], schema="order_id string, amount double, created_at string"
+        )
     df = spark.read.option("header", True).csv(str(path))
     df = df.withColumn("amount", col("amount").cast(DoubleType()))
     df = df.withColumn("order_id", col("order_id").cast(StringType()))
     return df
 
 
-def read_orders_for_month(spark: SparkSession, input_dir: Path, year: int, month: int) -> DataFrame:
+def read_orders_for_month(
+    spark: SparkSession, input_dir: Path, year: int, month: int
+) -> DataFrame:
     from calendar import monthrange
 
     days = monthrange(year, month)[1]
@@ -230,8 +245,16 @@ def explode_items(df: DataFrame) -> DataFrame:
     price_cols = [c for c in ["unit_price", "price"] if c in item_fields]
 
     # Safe coalesce for missing fields
-    item_qty_expr = coalesce(*[col(f"item.{c}") for c in qty_cols]).cast(DoubleType()) if qty_cols else col("item.qty").cast(DoubleType())
-    item_price_expr = coalesce(*[col(f"item.{c}") for c in price_cols]).cast(DoubleType()) if price_cols else col("item.unit_price").cast(DoubleType())
+    item_qty_expr = (
+        coalesce(*[col(f"item.{c}") for c in qty_cols]).cast(DoubleType())
+        if qty_cols
+        else col("item.qty").cast(DoubleType())
+    )
+    item_price_expr = (
+        coalesce(*[col(f"item.{c}") for c in price_cols]).cast(DoubleType())
+        if price_cols
+        else col("item.unit_price").cast(DoubleType())
+    )
 
     # Flatten
     out = exploded.select(
@@ -240,14 +263,15 @@ def explode_items(df: DataFrame) -> DataFrame:
         "channel",
         "created_at",
         item_qty_expr.alias("item_qty"),
-        item_price_expr.alias("item_unit_price")
+        item_price_expr.alias("item_unit_price"),
     )
 
     return out
 
 
-
-def detect_and_save_rejects(df: DataFrame, out_dir: Path, csv_encoding: str = "utf-8") -> DataFrame:
+def detect_and_save_rejects(
+    df: DataFrame, out_dir: Path, csv_encoding: str = "utf-8"
+) -> DataFrame:
     if df.rdd.isEmpty():
         return df
     neg = df.filter(col("item_unit_price") < 0)
@@ -262,8 +286,8 @@ def detect_and_save_rejects(df: DataFrame, out_dir: Path, csv_encoding: str = "u
 
 
 def deduplicate_keep_first(df: DataFrame) -> DataFrame:
-    from pyspark.sql.window import Window
     from pyspark.sql.functions import row_number
+    from pyspark.sql.window import Window
 
     if df.rdd.isEmpty():
         return df
@@ -274,48 +298,62 @@ def deduplicate_keep_first(df: DataFrame) -> DataFrame:
     return df2
 
 
-def compute_per_order_and_agg(items_df: DataFrame, customers_df: DataFrame, refunds_df: DataFrame) -> Tuple[DataFrame, DataFrame]:
+def compute_per_order_and_agg(
+    items_df: DataFrame, customers_df: DataFrame, refunds_df: DataFrame
+) -> Tuple[DataFrame, DataFrame]:
     if items_df.rdd.isEmpty():
         return items_df, items_df
     # line gross
-    items_df = items_df.withColumn("line_gross", col("item_qty") * col("item_unit_price"))
-    per_order = (
-        items_df.groupBy("order_id", "customer_id", "channel", "created_at")
-        .agg(_sum("item_qty").alias("items_sold"), _sum("line_gross").alias("gross_revenue_eur"))
+    items_df = items_df.withColumn(
+        "line_gross", col("item_qty") * col("item_unit_price")
+    )
+    per_order = items_df.groupBy(
+        "order_id", "customer_id", "channel", "created_at"
+    ).agg(
+        _sum("item_qty").alias("items_sold"),
+        _sum("line_gross").alias("gross_revenue_eur"),
     )
     # join customers and filter active
     if not customers_df.rdd.isEmpty():
-        per_order = per_order.join(customers_df.select("customer_id", "city", "is_active"), "customer_id", "left")
+        per_order = per_order.join(
+            customers_df.select("customer_id", "city", "is_active"),
+            "customer_id",
+            "left",
+        )
         per_order = per_order.filter(col("is_active"))
     # parse order_date
     per_order = per_order.withColumn("order_date", to_date(col("created_at")))
     # refunds
     if not refunds_df.rdd.isEmpty():
-        refunds_sum = refunds_df.groupBy("order_id").agg(_sum(col("amount")).alias("refunds_eur"))
+        refunds_sum = refunds_df.groupBy("order_id").agg(
+            _sum(col("amount")).alias("refunds_eur")
+        )
     else:
         refunds_sum = None
     if refunds_sum is not None:
-        per_order = per_order.join(refunds_sum, "order_id", "left").na.fill({"refunds_eur": 0.0})
+        per_order = per_order.join(refunds_sum, "order_id", "left").na.fill(
+            {"refunds_eur": 0.0}
+        )
     else:
         per_order = per_order.withColumn("refunds_eur", lit(0.0))
     # aggregate
-    agg = (
-        per_order.groupBy("order_date", "city", "channel")
-        .agg(
-            countDistinct("order_id").alias("orders_count"),
-            countDistinct("customer_id").alias("unique_customers"),
-            _sum("items_sold").alias("items_sold"),
-            _sum("gross_revenue_eur").alias("gross_revenue_eur"),
-            _sum("refunds_eur").alias("refunds_eur"),
-        )
+    agg = per_order.groupBy("order_date", "city", "channel").agg(
+        countDistinct("order_id").alias("orders_count"),
+        countDistinct("customer_id").alias("unique_customers"),
+        _sum("items_sold").alias("items_sold"),
+        _sum("gross_revenue_eur").alias("gross_revenue_eur"),
+        _sum("refunds_eur").alias("refunds_eur"),
     )
-    agg = agg.withColumn("net_revenue_eur", col("gross_revenue_eur") - col("refunds_eur")).withColumnRenamed("order_date", "date")
+    agg = agg.withColumn(
+        "net_revenue_eur", col("gross_revenue_eur") - col("refunds_eur")
+    ).withColumnRenamed("order_date", "date")
     return per_order, agg
 
 
 # ---------------------------
 # Writers
 # ---------------------------
+
 
 def write_sqlite(df: DataFrame, db_path: Path, table_name: str):
     if df.rdd.isEmpty():
@@ -331,7 +369,9 @@ def write_sqlite(df: DataFrame, db_path: Path, table_name: str):
     logger.info("Wrote %d rows to %s:%s", len(pdf), db_path, table_name)
 
 
-def export_daily_csvs(agg_df: DataFrame, out_dir: Path, sep: str = ";", ffmt: str = "%.2f"):
+def export_daily_csvs(
+    agg_df: DataFrame, out_dir: Path, sep: str = ";", ffmt: str = "%.2f"
+):
     if agg_df.rdd.isEmpty():
         logger.info("No aggregate to export")
         return
@@ -341,11 +381,17 @@ def export_daily_csvs(agg_df: DataFrame, out_dir: Path, sep: str = ";", ffmt: st
         d = r[0]
         if d is None:
             continue
-        safe = d.strftime("%Y%m%d") if hasattr(d, "strftime") else str(d).replace("-", "")
+        safe = (
+            d.strftime("%Y%m%d") if hasattr(d, "strftime") else str(d).replace("-", "")
+        )
         sub = agg_df.filter(col("date") == lit(str(d)))
-        sub.coalesce(1).write.mode("overwrite").option("header", True).csv(str(out_dir / f"daily_summary_{safe}.csv"))
+        sub.coalesce(1).write.mode("overwrite").option("header", True).csv(
+            str(out_dir / f"daily_summary_{safe}.csv")
+        )
     # write all
-    agg_df.coalesce(1).write.mode("overwrite").option("header", True).csv(str(out_dir / "daily_summary_all.csv"))
+    agg_df.coalesce(1).write.mode("overwrite").option("header", True).csv(
+        str(out_dir / "daily_summary_all.csv")
+    )
     logger.info("Exported daily CSVs to %s", out_dir)
 
 
@@ -353,10 +399,24 @@ def export_daily_csvs(agg_df: DataFrame, out_dir: Path, sep: str = ";", ffmt: st
 # Orchestration main
 # ---------------------------
 
-def run_pipeline(settings_path: str, year: int = 2025, month: int = 3, spark_master: Optional[str] = None):
+
+def run_pipeline(
+    settings_path: str,
+    year: int = 2025,
+    month: int = 3,
+    spark_master: Optional[str] = None,
+):
     cfg = load_settings(settings_path)
-    input_dir = Path(cfg["input_dir"]) if cfg.get("input_dir") else Path(DEFAULT_SETTINGS["input_dir"])
-    output_dir = Path(cfg["output_dir"]) if cfg.get("output_dir") else Path(DEFAULT_SETTINGS["output_dir"])
+    input_dir = (
+        Path(cfg["input_dir"])
+        if cfg.get("input_dir")
+        else Path(DEFAULT_SETTINGS["input_dir"])
+    )
+    output_dir = (
+        Path(cfg["output_dir"])
+        if cfg.get("output_dir")
+        else Path(DEFAULT_SETTINGS["output_dir"])
+    )
     db_path = Path(cfg.get("db_path", DEFAULT_SETTINGS["db_path"]))
     sep = cfg.get("csv_sep", DEFAULT_SETTINGS["csv_sep"])
     enc = cfg.get("csv_encoding", DEFAULT_SETTINGS["csv_encoding"])
@@ -384,7 +444,15 @@ def run_pipeline(settings_path: str, year: int = 2025, month: int = 3, spark_mas
     # write outputs
     if not per_order.rdd.isEmpty():
         # convert to pandas subset like original
-        per_order_save = per_order.select("order_id", "customer_id", "city", "channel", "order_date", "items_sold", "gross_revenue_eur")
+        per_order_save = per_order.select(
+            "order_id",
+            "customer_id",
+            "city",
+            "channel",
+            "order_date",
+            "items_sold",
+            "gross_revenue_eur",
+        )
         write_sqlite(per_order_save, db_path, "orders_clean")
     write_sqlite(agg, db_path, "daily_city_sales")
     export_daily_csvs(agg, output_dir, sep=sep, ffmt=ffmt)
@@ -407,5 +475,3 @@ if __name__ == "__main__":
     parser.add_argument("--master", default=None, help="Spark master (e.g. local[*])")
     args = parser.parse_args()
     run_pipeline(args.settings, args.year, args.month, spark_master=args.master)
-
-

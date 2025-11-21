@@ -17,9 +17,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-import pandas as pd
 import yaml
 
+import pandas as pd
 
 DEFAULT_SETTINGS = {
     "input_dir": "./data/input",
@@ -47,7 +47,10 @@ def read_customers(path: Path) -> pd.DataFrame:
     if not path.exists():
         print(f"[WARN] customers file missing: {path}")
         return pd.DataFrame(columns=["customer_id", "city", "is_active"])
-    df = pd.read_csv(path, dtype={"customer_id": "string", "city": "string"}, encoding="utf-8")
+    df = pd.read_csv(
+        path, dtype={"customer_id": "string", "city": "string"}, encoding="utf-8"
+    )
+
     # normalize boolean-ish column
     def _to_bool(v):
         if isinstance(v, bool):
@@ -64,6 +67,7 @@ def read_customers(path: Path) -> pd.DataFrame:
             return bool(int(s))
         except Exception:
             return False
+
     if "is_active" in df.columns:
         df["is_active"] = df["is_active"].apply(_to_bool)
     else:
@@ -129,7 +133,10 @@ def explode_items_and_normalize(orders: pd.DataFrame) -> pd.DataFrame:
     # align index for concat: items corresponds to rows where items not null; create full items_frame with NaNs
     items_full = pd.DataFrame(index=orders.index, columns=items.columns)
     items_full.loc[items.index, items.columns] = items.values
-    result = pd.concat([orders[order_cols].reset_index(drop=True), items_full.reset_index(drop=True)], axis=1)
+    result = pd.concat(
+        [orders[order_cols].reset_index(drop=True), items_full.reset_index(drop=True)],
+        axis=1,
+    )
     # normalize types for item_qty and item_unit_price
     for col in ("item_qty", "item_unit_price"):
         if col in result.columns:
@@ -155,7 +162,9 @@ def detect_and_save_rejects(df: pd.DataFrame, out_dir: Path, enc: str) -> pd.Dat
     return df
 
 
-def aggregate_orders(per_item: pd.DataFrame, customers: pd.DataFrame, refunds: pd.DataFrame) -> pd.DataFrame:
+def aggregate_orders(
+    per_item: pd.DataFrame, customers: pd.DataFrame, refunds: pd.DataFrame
+) -> pd.DataFrame:
     """
     Build per_order and then aggregate per (date, city, channel).
     """
@@ -164,15 +173,16 @@ def aggregate_orders(per_item: pd.DataFrame, customers: pd.DataFrame, refunds: p
     # compute line_gross and per-order aggregates
     per_item["line_gross"] = per_item["item_qty"] * per_item["item_unit_price"]
     # choose created_at present in per_item for grouping - keep first created_at per order
-    per_order = (
-        per_item
-        .groupby(["order_id", "customer_id", "channel", "created_at"], as_index=False)
-        .agg(items_sold=("item_qty", "sum"), gross_revenue_eur=("line_gross", "sum"))
-    )
+    per_order = per_item.groupby(
+        ["order_id", "customer_id", "channel", "created_at"], as_index=False
+    ).agg(items_sold=("item_qty", "sum"), gross_revenue_eur=("line_gross", "sum"))
     # join customer info and keep active customers only
-    cust_subset = customers[["customer_id", "city", "is_active"]].drop_duplicates(subset=["customer_id"])
+    cust_subset = customers[["customer_id", "city", "is_active"]].drop_duplicates(
+        subset=["customer_id"]
+    )
     per_order = per_order.merge(cust_subset, on="customer_id", how="left")
     per_order = per_order[per_order["is_active"].fillna(False)].copy()
+
     # parse created_at into a date string ISO
     def to_iso_date(s):
         if pd.isna(s):
@@ -188,29 +198,36 @@ def aggregate_orders(per_item: pd.DataFrame, customers: pd.DataFrame, refunds: p
             return pd.to_datetime(s2, errors="coerce").date().isoformat()
         except Exception:
             return None
+
     per_order["order_date"] = per_order["created_at"].apply(to_iso_date)
     # refunds sum per order
     if not refunds.empty:
-        refunds_sum = refunds.groupby("order_id", as_index=False)["amount"].sum().rename(columns={"amount": "refunds_eur"})
+        refunds_sum = (
+            refunds.groupby("order_id", as_index=False)["amount"]
+            .sum()
+            .rename(columns={"amount": "refunds_eur"})
+        )
     else:
         refunds_sum = pd.DataFrame(columns=["order_id", "refunds_eur"])
-    per_order = per_order.merge(refunds_sum, on="order_id", how="left").fillna({"refunds_eur": 0.0})
+    per_order = per_order.merge(refunds_sum, on="order_id", how="left").fillna(
+        {"refunds_eur": 0.0}
+    )
     # save clean orders to DB later; here we compute aggregated metrics
-    agg = (
-        per_order
-        .groupby(["order_date", "city", "channel"], as_index=False)
-        .agg(
-            orders_count=("order_id", "nunique"),
-            unique_customers=("customer_id", "nunique"),
-            items_sold=("items_sold", "sum"),
-            gross_revenue_eur=("gross_revenue_eur", "sum"),
-            refunds_eur=("refunds_eur", "sum"),
-        )
+    agg = per_order.groupby(["order_date", "city", "channel"], as_index=False).agg(
+        orders_count=("order_id", "nunique"),
+        unique_customers=("customer_id", "nunique"),
+        items_sold=("items_sold", "sum"),
+        gross_revenue_eur=("gross_revenue_eur", "sum"),
+        refunds_eur=("refunds_eur", "sum"),
     )
     # net revenue should be gross - refunds
     agg["net_revenue_eur"] = agg["gross_revenue_eur"] - agg["refunds_eur"]
     # normalize column name to `date`
-    agg = agg.rename(columns={"order_date": "date"}).sort_values(["date", "city", "channel"]).reset_index(drop=True)
+    agg = (
+        agg.rename(columns={"order_date": "date"})
+        .sort_values(["date", "city", "channel"])
+        .reset_index(drop=True)
+    )
     return per_order, agg
 
 
@@ -236,17 +253,19 @@ def export_csvs(agg: pd.DataFrame, out_dir: Path, sep: str, enc: str, ffmt: str)
         # ensure date string has only digits
         safe_date = str(d).replace("-", "")
         out_path = out_dir / f"daily_summary_{safe_date}.csv"
-        sub[[
-            "date",
-            "city",
-            "channel",
-            "orders_count",
-            "unique_customers",
-            "items_sold",
-            "gross_revenue_eur",
-            "refunds_eur",
-            "net_revenue_eur",
-        ]].to_csv(out_path, index=False, sep=sep, encoding=enc, float_format=ffmt)
+        sub[
+            [
+                "date",
+                "city",
+                "channel",
+                "orders_count",
+                "unique_customers",
+                "items_sold",
+                "gross_revenue_eur",
+                "refunds_eur",
+                "net_revenue_eur",
+            ]
+        ].to_csv(out_path, index=False, sep=sep, encoding=enc, float_format=ffmt)
         print(f"[INFO] exported {out_path}")
     all_path = out_dir / "daily_summary_all.csv"
     agg.to_csv(all_path, index=False, sep=sep, encoding=enc, float_format=ffmt)
@@ -290,9 +309,15 @@ def main(args):
     # rename normalized item columns to match original script expectations
     # there was usage of item_qty and item_unit_price
     # try to coerce common names
-    if "item_quantity" in orders_items.columns and "item_qty" not in orders_items.columns:
+    if (
+        "item_quantity" in orders_items.columns
+        and "item_qty" not in orders_items.columns
+    ):
         orders_items = orders_items.rename(columns={"item_quantity": "item_qty"})
-    if "item_price" in orders_items.columns and "item_unit_price" not in orders_items.columns:
+    if (
+        "item_price" in orders_items.columns
+        and "item_unit_price" not in orders_items.columns
+    ):
         orders_items = orders_items.rename(columns={"item_price": "item_unit_price"})
 
     # detect negative prices and save rejects
@@ -301,7 +326,9 @@ def main(args):
     # deduplicate: keep first row per order_id (by created_at)
     if {"order_id", "created_at"}.issubset(orders_items.columns):
         before = len(orders_items)
-        orders_items = orders_items.sort_values(["order_id", "created_at"]).drop_duplicates(subset=["order_id"], keep="first")
+        orders_items = orders_items.sort_values(
+            ["order_id", "created_at"]
+        ).drop_duplicates(subset=["order_id"], keep="first")
         after = len(orders_items)
         print(f"[INFO] deduplication: {before} -> {after}")
     else:
@@ -312,15 +339,17 @@ def main(args):
 
     # save clean orders subset to sqlite (matching original selected columns)
     if not per_order.empty:
-        per_order_save = per_order[[
-            "order_id",
-            "customer_id",
-            "city",
-            "channel",
-            "order_date",
-            "items_sold",
-            "gross_revenue_eur",
-        ]].copy()
+        per_order_save = per_order[
+            [
+                "order_id",
+                "customer_id",
+                "city",
+                "channel",
+                "order_date",
+                "items_sold",
+                "gross_revenue_eur",
+            ]
+        ].copy()
         save_to_sqlite(per_order_save, db_path, "orders_clean")
 
     # save aggregate to sqlite and export CSVs
@@ -331,8 +360,12 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Process and aggregate orders for a month.")
-    parser.add_argument("--settings", default="settings.yaml", help="path to settings yaml")
+    parser = argparse.ArgumentParser(
+        description="Process and aggregate orders for a month."
+    )
+    parser.add_argument(
+        "--settings", default="settings.yaml", help="path to settings yaml"
+    )
     parser.add_argument("--in-dir", help="input directory overriding settings")
     parser.add_argument("--out-dir", help="output directory overriding settings")
     parser.add_argument("--db-path", help="sqlite db path overriding settings")
